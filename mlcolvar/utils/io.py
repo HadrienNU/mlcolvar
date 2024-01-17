@@ -152,6 +152,7 @@ def create_dataset_from_files(
     file_names: Union[list, str],
     folder: str = None,
     create_labels: bool = None,
+    labels: list = None,
     load_args: list = None,
     filter_args: dict = None,
     modifier_function=None,
@@ -170,6 +171,8 @@ def create_dataset_from_files(
         Common path for the files to be imported, by default None. If set, filenames become 'folder/file_name'.
     create_labels: bool, optional
         Assign a label to each file, default True if more than a file is given, otherwise False
+    labels: list, optional
+        List of labels to assign for each file
     load_args: list[dict], optional
         List of dictionaries with the arguments passed to load_dataframe function for each file (keys: start,stop,stride and pandas.read_csv options), by default None
     filter_args: dict, optional
@@ -217,7 +220,7 @@ def create_dataset_from_files(
 
     # check if create_labels if given, otherwise set it to True if more than one file is given
     if create_labels is None:
-        create_labels = False if len(file_names) == 1 else True
+        create_labels = False if (len(file_names) == 1 or labels is not None) else True
 
     # initialize pandas dataframe
     df = pd.DataFrame()
@@ -229,8 +232,12 @@ def create_dataset_from_files(
         # add label in the dataframe
         if create_labels:
             df_tmp["labels"] = i
+            curr_label = i
+        else:
+            df_tmp["labels"] = labels[i]
+            curr_label = labels[i]
         if verbose:
-            print(f"Class {i} dataframe shape: ", np.shape(df_tmp))
+            print(f"Class {curr_label} dataframe shape: ", np.shape(df_tmp))
 
         # update collective dataframe
         df = pd.concat([df, df_tmp], ignore_index=True)
@@ -249,7 +256,7 @@ def create_dataset_from_files(
 
     # create DictDataset
     dictionary = {"data": torch.Tensor(df_data.values)}
-    if create_labels:
+    if create_labels or labels is not None:
         dictionary["labels"] = torch.Tensor(df["labels"].values)
     dataset = DictDataset(dictionary, feature_names=df_data.columns.values)
 

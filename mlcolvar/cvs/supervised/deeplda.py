@@ -5,8 +5,62 @@ from mlcolvar.core import FeedForward, Normalization
 from mlcolvar.data import DictModule
 from mlcolvar.core.stats import LDA
 from mlcolvar.core.loss import ReduceEigenvaluesLoss
+from mlcolvar.core.transform.utils import Statistics
 
-__all__ = ["DeepLDA"]
+__all__ = ["NormLDA", "DeepLDA"]
+
+
+class NormLDA(BaseCV):
+    """Normed Linear Discriminant Analysis (Deep-LDA) CV."""
+
+    BLOCKS = ["lda", "norm_out"]
+
+    def __init__(self, in_features: int, n_states: int, options: dict = None, **kwargs):
+        """
+        Define a Deep Linear Discriminant Analysis (Deep-LDA) CV composed by a
+        neural network module and a LDA object.
+        By default a module standardizing the inputs is also used.
+
+        Parameters
+        ----------
+        layers : list
+            Number of neurons per layer
+        n_states : int
+            Number of states for the training
+        options : dict[str, Any], optional
+            Options for the building blocks of the model, by default {}.
+            Available blocks: ['lda', 'norm_out'] .
+            Set 'block_name' = None or False to turn off that block
+        """
+        super().__init__(in_features=in_features, out_features=n_states - 1, **kwargs)
+
+        # ======= OPTIONS =======
+        # parse and sanitize
+        options = self.parse_options(options)
+
+        # Save n_states
+        self.n_states = n_states
+
+        # ======= BLOCKS =======
+        # initialize lda
+        o = "lda"
+        self.lda = LDA(in_features, n_states, **options[o])
+        # initialize norm_out
+        o = "norm_out"
+        if (options[o] is not False) and (options[o] is not None):
+            self.norm_out = Normalization(n_states - 1, **options[o])
+
+    def fit(self, X, labels):
+        eigvals, eigvecs = self.lda.compute(X, labels, save_params=True)
+        self.norm_out.set_from_stats(stats=Statistics(self.lda(X)))
+        return self
+
+    def save_hyperparameters(self, *args, **kwargs):
+        pass
+
+    def __call__(self, X):
+        s = self.lda(X)
+        return self.norm_out(s)
 
 
 class DeepLDA(BaseCV, lightning.LightningModule):

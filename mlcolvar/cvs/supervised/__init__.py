@@ -1,4 +1,4 @@
-__all__ = ["DeepLDA", "DeepTDA", "RegressionCV"]
+__all__ = ["DeepLDA", "DeepTDA", "RegressionCV", "NormLDA"]
 
 from .deeplda import *
 from .deeptda import *

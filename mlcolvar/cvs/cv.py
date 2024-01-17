@@ -107,9 +107,11 @@ class BaseCV:
             self.initialize_transforms(self.trainer.datamodule)
 
     def initialize_transforms(self, datamodule):
+        stats = datamodule.train_dataloader().get_stats(preprocessing=self.preprocessing)["data"]
+
         for b in self.BLOCKS:
             if isinstance(getattr(self, b), Transform):
-                getattr(self, b).setup_from_datamodule(datamodule)
+                getattr(self, b).set_from_stats(stats, getattr(self, b).mode)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -225,3 +227,40 @@ class BaseCV:
             if (key == "loss_fn") and ("cannot assign" in str(e)):
                 del self.loss_fn
                 super().__setattr__(key, value)
+
+    def load_state_dict(self, state_dict):
+        missing_keys = {}
+        unexpected_keys = {}
+        if self.preprocessing is not None:
+            mk, uk = self.preprocessing.load_state_dict(state_dict["preprocessing"])
+            missing_keys["preprocessing"] = mk
+            unexpected_keys["preprocessing"] = uk
+
+        if self.postprocessing is not None:
+            mk, uk = self.postprocessing.load_state_dict(state_dict["postprocessing"])
+            missing_keys["postprocessing"] = mk
+            unexpected_keys["postprocessing"] = uk
+        for b in self.BLOCKS:
+            block = getattr(self, b)
+            if block is not None:
+                mk, uk = block.load_state_dict(state_dict[b])
+                missing_keys[b] = mk
+                unexpected_keys[b] = uk
+        return missing_keys, unexpected_keys
+
+    def state_dict(self):
+        if self.preprocessing is not None:
+            preprocessing_dict = self.preprocessing.state_dict()
+        else:
+            preprocessing_dict = None
+
+        if self.postprocessing is not None:
+            postprocessing_dict = self.postprocessing.state_dict()
+        else:
+            postprocessing_dict = None
+        dict = {"preprocessing": preprocessing_dict, "postprocessing": postprocessing_dict}
+        for b in self.BLOCKS:
+            block = getattr(self, b)
+            if block is not None:
+                dict[b] = block.state_dict()
+        return dict

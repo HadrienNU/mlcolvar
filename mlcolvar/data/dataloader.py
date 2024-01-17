@@ -283,7 +283,7 @@ class DictLoader:
         string = f"DictLoader(length={self.dataset_len}, batch_size={self.batch_size}, shuffle={self.shuffle})"
         return string
 
-    def get_stats(self, dataset_idx: Optional[int] = None):
+    def get_stats(self, dataset_idx: Optional[int] = None, preprocessing=None):
         """Compute statistics ``('mean','std','min','max')`` of the dataloader.
 
         Parameters
@@ -316,7 +316,10 @@ class DictLoader:
         stats = {f"dataset{i}": {} for i in range(len(datasets))}
         for dataset_idx, dataset in enumerate(datasets):
             for k in dataset.keys:
-                stats[f"dataset{dataset_idx}"][k] = Statistics(dataset[k]).to_dict()
+                if preprocessing is not None and k == "data":
+                    stats[f"dataset{dataset_idx}"][k] = Statistics(preprocessing(dataset[k])).to_dict()
+                else:
+                    stats[f"dataset{dataset_idx}"][k] = Statistics(dataset[k]).to_dict()
 
         # Return only a single dictionary if there are no multiple datasets.
         if is_selected_dataset or not self.has_multiple_datasets:
