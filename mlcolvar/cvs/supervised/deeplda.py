@@ -59,6 +59,8 @@ class NormLDA(BaseCV):
         pass
 
     def __call__(self, X):
+        if self.preprocessing is not None:
+            X = self.preprocessing(X)
         s = self.lda(X)
         return self.norm_out(s)
 
@@ -196,9 +198,7 @@ class DeepLDA(BaseCV, lightning.LightningModule):
         # =================forward====================
         h = self.forward_nn(x)
         # ===================lda======================
-        eigvals, _ = self.lda.compute(
-            h, y, save_params=True if self.training else False
-        )
+        eigvals, _ = self.lda.compute(h, y, save_params=True if self.training else False)
         # ===================loss=====================
         loss = self.loss_fn(eigvals)
         if self.lorentzian_reg > 0:
@@ -223,10 +223,7 @@ def test_deeplda(n_states=2):
     n_points = 500
     X, y = [], []
     for i in range(n_states):
-        X.append(
-            torch.randn(n_points, in_features) * (i + 1)
-            + torch.Tensor([10 * i, (i - 1) * 10])
-        )
+        X.append(torch.randn(n_points, in_features) * (i + 1) + torch.Tensor([10 * i, (i - 1) * 10]))
         y.append(torch.ones(n_points) * i)
 
     X = torch.cat(X, dim=0)
@@ -244,9 +241,7 @@ def test_deeplda(n_states=2):
     model = DeepLDA(layers, n_states, options=opts)
 
     # create trainer and fit
-    trainer = lightning.Trainer(
-        max_epochs=1, log_every_n_steps=2, logger=None, enable_checkpointing=False
-    )
+    trainer = lightning.Trainer(max_epochs=1, log_every_n_steps=2, logger=None, enable_checkpointing=False)
     trainer.fit(model, datamodule)
 
     # eval

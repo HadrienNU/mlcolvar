@@ -36,7 +36,7 @@ class BaseCV:
 
         # The parent class sets in_features and out_features based on their own
         # init arguments so we don't need to save them here (see #103).
-        self.save_hyperparameters(ignore=['in_features', 'out_features'])
+        self.save_hyperparameters(ignore=["in_features", "out_features"])
 
         # MODEL
         self.initialize_blocks()
@@ -59,12 +59,7 @@ class BaseCV:
 
     @property
     def example_input_array(self):
-        return torch.randn(
-            (1,self.in_features)
-            if self.preprocessing is None
-            or not hasattr(self.preprocessing, "in_features")
-            else self.preprocessing.in_features
-        )
+        return torch.randn((1, self.in_features) if self.preprocessing is None or not hasattr(self.preprocessing, "in_features") else self.preprocessing.in_features)
 
     def parse_options(self, options: dict = None):
         """
@@ -89,9 +84,7 @@ class BaseCV:
                 elif o == "lr_scheduler":
                     self.lr_scheduler_kwargs.update(options[o])
                 else:
-                    raise ValueError(
-                        f'The key {o} is not available in this class. The available keys are: {", ".join(self.BLOCKS)}, optimizer and lr_scheduler.'
-                    )
+                    raise ValueError(f'The key {o} is not available in this class. The available keys are: {", ".join(self.BLOCKS)}, optimizer and lr_scheduler.')
 
         return options
 
@@ -186,9 +179,7 @@ class BaseCV:
     @optimizer_name.setter
     def optimizer_name(self, optimizer_name: str):
         if not hasattr(torch.optim, optimizer_name):
-            raise AttributeError(
-                f"torch.optim does not have a {optimizer_name} optimizer."
-            )
+            raise AttributeError(f"torch.optim does not have a {optimizer_name} optimizer.")
         self._optimizer_name = optimizer_name
 
     def configure_optimizers(self):
@@ -201,16 +192,14 @@ class BaseCV:
             Torch optimizer
         """
 
-        optimizer = getattr(torch.optim, self._optimizer_name)(
-            self.parameters(), **self.optimizer_kwargs
-        )
+        optimizer = getattr(torch.optim, self._optimizer_name)(self.parameters(), **self.optimizer_kwargs)
 
         if self.lr_scheduler_kwargs:
-            scheduler_cls = self.lr_scheduler_kwargs['scheduler']
-            scheduler_kwargs = {k: v for k, v in self.lr_scheduler_kwargs.items() if k != 'scheduler'}
+            scheduler_cls = self.lr_scheduler_kwargs["scheduler"]
+            scheduler_kwargs = {k: v for k, v in self.lr_scheduler_kwargs.items() if k != "scheduler"}
             lr_scheduler = scheduler_cls(optimizer, **scheduler_kwargs)
-            return [optimizer] , [lr_scheduler]
-        else: 
+            return [optimizer], [lr_scheduler]
+        else:
             return optimizer
 
     def __setattr__(self, key, value):
@@ -246,6 +235,9 @@ class BaseCV:
                 mk, uk = block.load_state_dict(state_dict[b])
                 missing_keys[b] = mk
                 unexpected_keys[b] = uk
+        # TODO: Add tests on missing keys and unexpected keys
+        # self.in_features = dict["in_features"]
+        # self.out_features = dict["out_features"]
         return missing_keys, unexpected_keys
 
     def state_dict(self):
@@ -263,4 +255,6 @@ class BaseCV:
             block = getattr(self, b)
             if block is not None:
                 dict[b] = block.state_dict()
+        dict["in_features"] = self.in_features
+        dict["out_features"] = self.out_features
         return dict
