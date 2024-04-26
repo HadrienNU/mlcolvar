@@ -48,7 +48,7 @@ class KRR(torch.nn.Module):
         size = (input.size(0), self.n_centers, self.in_features)
         x = input.unsqueeze(1).expand(size)
         c = self.centres.unsqueeze(0).expand(size)
-        distances = (x - c).pow(2).sum(-1).pow(0.5) / self.gamma
+        distances = (x - c).pow(2).sum(-1).pow(0.5) * self.gamma
         return torch.matmul(self.basis_func(distances), self.coef) + self.intercept
 
     def setup_from_datamodule(self, datamodule):
@@ -119,10 +119,27 @@ def matern52(alpha):
     return phi
 
 
+def sigmoid(alpha):
+    return torch.tanh(alpha)
+
+
 def basis_func_dict():
     """
     A helper function that returns a dictionary containing each RBF
     """
 
-    bases = {"gaussian": gaussian, "linear": linear, "quadratic": quadratic, "inverse quadratic": inverse_quadratic, "multiquadric": multiquadric, "inverse multiquadric": inverse_multiquadric, "spline": spline, "poisson one": poisson_one, "poisson two": poisson_two, "matern32": matern32, "matern52": matern52}
+    bases = {
+        "rbf": gaussian,
+        "linear": linear,
+        "quadratic": quadratic,
+        "inverse quadratic": inverse_quadratic,
+        "multiquadric": multiquadric,
+        "inverse multiquadric": inverse_multiquadric,
+        "spline": spline,
+        "poisson one": poisson_one,
+        "poisson two": poisson_two,
+        "matern32": matern32,
+        "matern52": matern52,
+        "sigmoid": sigmoid,
+    }
     return bases
