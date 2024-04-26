@@ -29,14 +29,15 @@ class KRR(torch.nn.Module):
             distances.
     """
 
-    def __init__(self, coefficients, centers, gamma, basis_func):
+    def __init__(self, coefficients, centers, gamma, basis_func, intercept=torch.zeros(1)):
         super(KRR, self).__init__()
         self.in_features = centers.size(1)
         self.out_features = coefficients.size(1)
         self.n_centers = centers.size(0)
         self.centres = centers
         self.gamma = gamma
-        self.alpha = nn.Parameter(coefficients)
+        self.coef = nn.Parameter(coefficients)
+        self.intercept = nn.Parameter(intercept)
         self.basis_func = basis_func_dict()[basis_func]
         self.reset_parameters()
 
@@ -48,7 +49,7 @@ class KRR(torch.nn.Module):
         x = input.unsqueeze(1).expand(size)
         c = self.centres.unsqueeze(0).expand(size)
         distances = (x - c).pow(2).sum(-1).pow(0.5) / self.gamma
-        return torch.matmul(self.basis_func(distances), self.alpha)
+        return torch.matmul(self.basis_func(distances), self.coef) + self.intercept
 
     def setup_from_datamodule(self, datamodule):
         """
