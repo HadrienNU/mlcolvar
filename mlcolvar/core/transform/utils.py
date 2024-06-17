@@ -2,8 +2,40 @@ import torch
 from typing import Union
 from warnings import warn
 
-__all__ = ["Statistics", "Inverse"]
+__all__ = ["SequentialTransform", "Inverse", "Statistics"]
 
+
+class SequentialTransform(torch.nn.Sequential):
+    "Helper class to apply multiple transforms sequentially working exactly as `torch.nn.Sequential`"
+    @property
+    def in_features(self):
+      return next(self.modules())[0].in_features
+    
+    @property
+    def out_features(self):
+      return next(self.modules())[-1].out_features
+
+class Inverse(torch.nn.Module):
+    "Wrapper to return the inverse method of a module as a torch.nn.Module"
+
+    def __init__(self, module: torch.nn.Module):
+        """Return the inverse method of a module as a torch.nn.Module
+
+        Parameters
+        ----------
+        module : torch.nn.Module
+            Module to be inverted
+        """
+        super().__init__()
+        if not hasattr(module, "inverse"):
+            raise AttributeError("The given module does not have a 'inverse' method!")
+        self.module = module
+
+    def inverse(self, *args, **kwargs):
+        return self.module(*args, **kwargs)
+
+    def forward(self, *args, **kwargs):
+        return self.module.inverse(*args, **kwargs)
 
 class Statistics(object):
     """
@@ -79,58 +111,86 @@ class Statistics(object):
         for prop in self.properties:
             repr += f"{prop}: {getattr(self,prop).numpy()} "
         return repr
+    
+def test_sequential_transform():
+    # test with sequential PairwiseDistances and a SwitchingFunctions as to compute contacts
+    from mlcolvar.core.transform.descriptors import PairwiseDistances
+    from mlcolvar.core.transform.tools import SwitchingFunctions
+    
+    compute_distances = PairwiseDistances(n_atoms=4, PBC=True, cell=[2,2,2], scaled_coords=True)
+    apply_switch = SwitchingFunctions(in_features=6, name='Rational', cutoff=1)
+
+    # mock positions
+    pos = torch.rand((2, 4, 3))
+    pos.requires_grad = True
+
+    # create sequential transform
+    sequential = SequentialTransform(compute_distances, apply_switch)
+
+    # compute reference
+    dist = compute_distances(pos)
+    cont_ref = apply_switch(dist)
+
+    # compute sequential
+    cont_seq = sequential(pos)
+    cont_seq.sum().backward()
+    assert(torch.allclose(cont_ref, cont_seq))
+    assert(sequential.in_features == compute_distances.in_features)
+    assert(sequential.out_features == apply_switch.out_features)
 
 
-class Inverse(torch.nn.Module):
-    "Wrapper to return the inverse method of a module as a torch.nn.Module"
+    # check the machinery in training, we use the committor as it applies preprocessing in the training as well
+    from mlcolvar.cvs.committor import Committor
+    from mlcolvar.cvs.committor.utils import initialize_committor_masses
+    from mlcolvar.data import DictDataset, DictModule
+    import lightning
 
-    def __init__(self, module: torch.nn.Module):
-        """Return the inverse method of a module as a torch.nn.Module
+    masses = initialize_committor_masses(atom_types=[0,0,0,0], masses=[1.008])
+    model = Committor(layers=[6,2,1], mass=masses, alpha=1)
+    model.preprocessing = sequential
 
-        Parameters
-        ----------
-        module : torch.nn.Module
-            Module to be inverted
-        """
-        super().__init__()
-        if not hasattr(module, "inverse"):
-            raise AttributeError("The given module does not have a 'inverse' method!")
-        self.module = module
+    pos = torch.rand((5, 4, 3))
+    labels = torch.zeros(len(pos))
+    labels[int(len(pos)/2):] += 1
+    weights = torch.ones(len(pos))
 
-    def inverse(self, *args, **kwargs):
-        return self.module.inverse(*args, **kwargs)
+    dataset = DictDataset({"data": pos, "labels": labels, "weights": weights})
+    datamodule = DictModule(dataset, lengths=[1])
 
-    def forward(self, *args, **kwargs):
-        return self.inverse(*args, **kwargs)
+    # train model
+    trainer = lightning.Trainer(max_epochs=5, logger=None, enable_checkpointing=False, limit_val_batches=0, num_sanity_val_steps=0)
+    trainer.fit(model, datamodule)
 
+    out = model(pos)
+    out.sum().backward()
 
-def batch_reshape(t: torch.Tensor, size: torch.Size) -> torch.Tensor:
-    """Return value reshaped according to size.
-    In case of batch unsqueeze and expand along the first dimension.
-    For single inputs just pass.
+def test_inverse():
+    from mlcolvar.core.transform import Transform
+    # create dummy model to scale the average to 0
+    class ForwardModel(Transform):
+        def __init__(self, in_features=5, out_features=5):
+            super().__init__(in_features=5, out_features=5)
+            self.mean = 0
 
-    Parameters
-    ----------
-        mean and range
+        def update_mean(self, x):
+            self.mean = torch.mean(x)
+        
+        def forward(self, x):
+            x = x - self.mean
+            return x
 
-    """
-    if len(size) == 1:
-        return t
-    if len(size) == 2:
-        batch_size = size[0]
-        x_size = size[1]
-        t = t.unsqueeze(0).expand(batch_size, x_size)
-    else:
-        raise ValueError(
-            f"Input tensor must of shape (n_features) or (n_batch,n_features), not {size} (len={len(size)})."
-        )
-    return t
+        def inverse(self, x):
+            x = x + self.mean
+            return x
 
+    forward_model = ForwardModel()
+    inverse_model = Inverse(forward_model)
 
-# ================================================================================================
-# ======================================== TEST FUNCTIONS ========================================
-# ================================================================================================
+    input = torch.rand(5)
+    forward_model.update_mean(input)
+    out = forward_model(input)
 
+    assert(input.mean() == inverse_model(out).mean()) 
 
 def test_statistics():
     # create fake data
@@ -173,8 +233,4 @@ def test_statistics():
                 stats[key].update(batch[key])
 
     for key in loader.keys:
-        print(key, stats[key])
-
-
-if __name__ == "__main__":
-    test_statistics()
+        print(key,stats[key])
