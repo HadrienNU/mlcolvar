@@ -1,6 +1,7 @@
 __all__ = [
     "BaseCV",
     "DeepLDA",
+    "DeepKAN_LDA",
     "DeepTICA",
     "DeepTDA",
     "AutoEncoderCV",
