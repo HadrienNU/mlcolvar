@@ -20,6 +20,7 @@ from typing import Optional, Union
 import torch
 import lightning
 from mlcolvar.core.nn.utils import get_activation, parse_nn_options
+from better_kan import KAN, build_rbf_layers
 
 
 # =============================================================================
@@ -40,6 +41,7 @@ class FeedForward(lightning.LightningModule):
         dropout: Optional[Union[float, list]] = None,
         batchnorm: Union[bool, list] = False,
         last_layer_activation: bool = False,
+        use_kan: bool = False,
         **kwargs,
     ):
         """Constructor.
@@ -69,6 +71,7 @@ class FeedForward(lightning.LightningModule):
         **kwargs:
             Optional arguments passed to torch.nn.Module
         """
+
         super().__init__(**kwargs)
 
         # Parse layers
@@ -110,3 +113,50 @@ class FeedForward(lightning.LightningModule):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.nn(x)
+
+
+# define the LightningModule
+class KANFeedForward(lightning.LightningModule):
+    def __init__(
+        self,
+        layers,
+        lamb=0.01,
+        lamb_l1=1.0,
+        lamb_entropy=1.0,
+        update_grid=True,
+        grid_update_num=10,
+        stop_grid_update_step=50,
+        **kwargs,
+    ):
+        super().__init__()
+        self.kan = KAN(build_rbf_layers(layers, **kwargs))
+        self.lamb = lamb
+        self.lamb_l1 = lamb_l1
+        self.lamb_entropy = lamb_entropy
+
+        # If training is used
+        self.update_grid = update_grid
+        self.stop_grid_update_step = stop_grid_update_step
+        self.grid_update_freq = int(stop_grid_update_step / grid_update_num)
+
+    def forward(self, x: torch.Tensor, update_grid=False) -> torch.Tensor:
+        return self.kan.forward(x, update_grid=update_grid)
+
+    def regularization(self):
+        return self.lamb * self.kan.regularization_loss(self.lamb_l1, self.lamb_entropy)
+
+    def training_step(self, batch, batch_idx):
+        # training_step defines the train loop.
+        # it is independent of forward
+
+        x, y = batch
+        x = x.view(-1, self.kan.width[0])  # Assure input has the correct size
+
+        pred = self.kan.forward(x, update_grid=(batch_idx % self.grid_update_freq == 0 and batch_idx < self.stop_grid_update_step and self.update_grid))
+        train_loss = torch.mean((pred - y) ** 2)
+        reg_ = self.regularization()
+        loss = train_loss + reg_
+
+        self.log("train_loss", loss)
+        self.log("regularization", reg_)
+        return loss

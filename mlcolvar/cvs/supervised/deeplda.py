@@ -6,9 +6,8 @@ from mlcolvar.data import DictModule
 from mlcolvar.core.stats import LDA
 from mlcolvar.core.loss import ReduceEigenvaluesLoss
 from mlcolvar.core.transform.utils import Statistics
-from kan import KAN
 
-__all__ = ["NormLDA", "DeepLDA", "DeepKAN_LDA"]
+__all__ = ["NormLDA", "DeepLDA"]
 
 
 class NormLDA(BaseCV):
@@ -206,190 +205,8 @@ class DeepLDA(BaseCV, lightning.LightningModule):
             s = self.lda(h)
             lorentzian_reg = self.regularization_lorentzian(s)
             loss += lorentzian_reg
-        # ====================log=====================
-        name = "train" if self.training else "valid"
-        loss_dict = {f"{name}_loss": loss, f"{name}_lorentzian_reg": lorentzian_reg}
-        eig_dict = {f"{name}_eigval_{i+1}": eigvals[i] for i in range(len(eigvals))}
-        self.log_dict(dict(loss_dict, **eig_dict), on_step=True, on_epoch=True)
-        return loss
-
-
-class DeepKAN_LDA(BaseCV, lightning.LightningModule):
-    """Deep Linear Discriminant Analysis (Deep-LDA) CV.
-    Non-linear generalization of LDA in which a feature map is learned by a neural network optimized
-    as to maximize the classes separation. The method is described in [1]_.
-
-    **Data**: for training it requires a DictDataset with the keys 'data' and 'labels'.
-
-    **Loss**: maximize LDA eigenvalues (ReduceEigenvaluesLoss)
-
-    References
-    ----------
-    .. [1] L. Bonati, V. Rizzi, and M. Parrinello, "Data-driven collective variables for enhanced
-        sampling", JPCL 11, 2998–3004 (2020).
-
-    See also
-    --------
-    mlcolvar.core.stats.LDA
-        Linear Discriminant Analysis method
-    mlcolvar.core.loss.ReduceEigenvalueLoss
-        Eigenvalue reduction to a scalar quantity
-    """
-
-    BLOCKS = ["norm_in", "kan", "lda"]
-
-    def __init__(self, layers: list, n_states: int, kan_lock=None, options: dict = None, **kwargs):
-        """
-        Define a Deep Linear Discriminant Analysis (Deep-LDA) CV composed by a
-        neural network module and a LDA object.
-        By default a module standardizing the inputs is also used.
-
-        Parameters
-        ----------
-        layers : list
-            Number of neurons per layer
-        n_states : int
-            Number of states for the training
-        options : dict[str, Any], optional
-            Options for the building blocks of the model, by default {}.
-            Available blocks: ['norm_in','nn','lda'] .
-            Set 'block_name' = None or False to turn off that block
-        """
-        super().__init__(in_features=layers[0], out_features=layers[-1], **kwargs)
-
-        # =======   LOSS  =======
-        # Maximize the sum of all the LDA eigenvalues.
-        self.loss_fn = ReduceEigenvaluesLoss(mode="sum")
-
-        # A voir comment passer l'option
-        self.grid_update_freq = 5
-        self.stop_grid_update_step = 50
-
-        # ======= OPTIONS =======
-        # parse and sanitize
-        options = self.parse_options(options)
-
-        # Save n_states
-        self.n_states = n_states
-
-        # ======= BLOCKS =======
-
-        # initialize norm_in
-        o = "norm_in"
-        if (options[o] is not False) and (options[o] is not None):
-            self.norm_in = Normalization(self.in_features, **options[o])
-
-        # initialize nn
-        o = "kan"
-        self.kan = KAN(width=layers, **options[o], device=self.device)
-        self.kan.train = lambda x: None
-        if kan_lock is not None:
-            #  Locking together invariant input
-            for set in kan_lock:  # That will lock together all function that have element in set
-                self.kan.lock(0, [[p, q] for p in set for q in range(layers[1])])
-        # initialize lda
-        o = "lda"
-        self.lda = LDA(layers[-1], n_states, **options[o])
-
-        # regularization
-        self.lorentzian_reg = 40  # == 2/sw_reg, see set_regularization
-        self.set_regularization(sw_reg=0.05)
-
-    def forward_nn(self, x: torch.Tensor) -> torch.Tensor:
-        if self.norm_in is not None:
-            x = self.norm_in(x)
-        x = self.kan(x)
-        return x
-
-    def set_regularization(self, sw_reg=0.05, lorentzian_reg=None):
-        r"""
-        Set magnitude of regularizations for the training:
-        - add identity matrix multiplied by `sw_reg` to within scatter S_w.
-        - add lorentzian regularization to NN outputs with magnitude `lorentzian_reg`
-
-        If `lorentzian_reg` is None, set it equal to `2./sw_reg`.
-
-        Parameters
-        ----------
-        sw_reg : float
-            Regularization value for S_w.
-        lorentzian_reg: float
-            Regularization for lorentzian on NN outputs.
-
-        Notes
-        -----
-        These regularizations are described in [1]_.
-
-        - S_w
-        .. math:: S_w = S_w + \mathtt{sw_reg}\ \mathbf{1}.
-
-        - Lorentzian
-
-        .. math:: \text{reg}_{lor}=\alpha \left( 1+( \mathbb{E}\left[||\mathbf{s}||^2\right]-1)^2 \right)^{-1}
-
-        """
-        self.lda.sw_reg = sw_reg
-        if lorentzian_reg is None:
-            self.lorentzian_reg = 2.0 / sw_reg
-        else:
-            self.lorentzian_reg = lorentzian_reg
-
-    def regularization_lorentzian(self, x):
-        """
-        Compute lorentzian regularization on the CVs.
-
-        Parameters
-        ----------
-        x : float
-            input data
-        """
-        reg_loss = x.pow(2).sum().div(x.size(0))
-        reg_loss_lor = -self.lorentzian_reg / (1 + (reg_loss - 1).pow(2))
-        return reg_loss_lor
-
-    # def reg(self, acts_scale):
-    #     def nonlinear(x, th=small_mag_threshold, factor=small_reg_factor):
-    #         return (x < th) * x * factor + (x > th) * (x + (factor - 1) * th)
-    #
-    #     reg_ = 0.0
-    #     for i in range(len(acts_scale)):
-    #         vec = acts_scale[i].reshape(
-    #             -1,
-    #         )
-    #
-    #         p = vec / torch.sum(vec)
-    #         l1 = torch.sum(nonlinear(vec))
-    #         entropy = -torch.sum(p * torch.log2(p + 1e-4))
-    #         reg_ += lamb_l1 * l1 + lamb_entropy * entropy  # both l1 and entropy
-    #
-    #     # regularize coefficient to encourage spline to be zero
-    #     for i in range(len(self.kan.act_fun)):
-    #         coeff_l1 = torch.sum(torch.mean(torch.abs(self.kan.act_fun[i].coef), dim=1))
-    #         coeff_diff_l1 = torch.sum(torch.mean(torch.abs(torch.diff(self.act_fun[i].coef)), dim=1))
-    #         reg_ += lamb_coef * coeff_l1 + lamb_coefdiff * coeff_diff_l1
-    #
-    #     return reg_
-
-    def training_step(self, train_batch, batch_idx):
-        """Compute and return the training loss and record metrics."""
-        # =================get data===================
-        x = train_batch["data"]
-        y = train_batch["labels"]
-        # =================forward====================
-        if batch_idx % self.grid_update_freq == 0 and batch_idx < self.stop_grid_update_step:
-            self.kan.update_grid_from_samples(x)
-        h = self.forward_nn(x)
-        # ===================lda======================
-        eigvals, _ = self.lda.compute(h, y, save_params=True if self.training else False)
-        # ===================loss=====================
-        loss = self.loss_fn(eigvals)
-        if self.lorentzian_reg > 0:
-            s = self.lda(h)
-            lorentzian_reg = self.regularization_lorentzian(s)
-            loss += lorentzian_reg
-        # Other L1 regularization
-        # reg_ = self.reg(self.kan.acts_scale)
-        # loss += lamb * reg_
+        if hasattr(self.nn, "regularization"):
+            loss += self.nn.regularization()
         # ====================log=====================
         name = "train" if self.training else "valid"
         loss_dict = {f"{name}_loss": loss, f"{name}_lorentzian_reg": lorentzian_reg}
@@ -439,7 +256,7 @@ def test_deepkanlda(n_states=2):
     from mlcolvar.data import DictDataset
 
     in_features, out_features = 2, n_states - 1
-    layers = [in_features, 5, 3, out_features]
+    layers = [in_features, 50, 50, out_features]
 
     # create dataset
     n_points = 500
@@ -457,11 +274,10 @@ def test_deepkanlda(n_states=2):
     # initialize CV
     opts = {
         "norm_in": {"mode": "mean_std"},
-        "kan": {"grid": 5, "k": 3, "seed": 0},
+        "nn": {"use_kan": "True", "grid_size": 6},
         "lda": {},
     }
-    print(layers, n_states)
-    model = DeepKAN_LDA(layers, n_states, kan_lock=[[0, 1]], options=opts)
+    model = DeepLDA(layers, n_states, options=opts)
 
     # create trainer and fit
     trainer = lightning.Trainer(max_epochs=1, log_every_n_steps=2, logger=None, enable_checkpointing=False)
@@ -474,7 +290,7 @@ def test_deepkanlda(n_states=2):
 
 
 if __name__ == "__main__":
-    test_deeplda(n_states=2)
-    test_deeplda(n_states=3)
+    # test_deeplda(n_states=2)
+    # test_deeplda(n_states=3)
     test_deepkanlda(n_states=2)
     test_deepkanlda(n_states=3)
