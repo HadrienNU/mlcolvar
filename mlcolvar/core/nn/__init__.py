@@ -1,3 +1,3 @@
-__all__ = ["FeedForward"]
+__all__ = ["FeedForward", "KANFeedForward", "get_feedforward"]
 
 from .feedforward import *

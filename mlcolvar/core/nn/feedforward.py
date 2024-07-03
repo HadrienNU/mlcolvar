@@ -8,7 +8,7 @@
 Variational Autoencoder collective variable.
 """
 
-__all__ = ["FeedForward"]
+__all__ = ["FeedForward", "KANFeedForward", "get_feedforward"]
 
 
 # =============================================================================
@@ -20,7 +20,14 @@ from typing import Optional, Union
 import torch
 import lightning
 from mlcolvar.core.nn.utils import get_activation, parse_nn_options
-from better_kan import KAN, build_rbf_layers
+from better_kan import KAN, build_rbf_layers, build_splines_layers, build_chebyshev_layers
+
+
+def get_feedforward(layers, options):
+    if options.get("use_kan", False):
+        return KANFeedForward(layers, **options)
+    else:
+        return FeedForward(layers, **options)
 
 
 # =============================================================================
@@ -41,7 +48,6 @@ class FeedForward(lightning.LightningModule):
         dropout: Optional[Union[float, list]] = None,
         batchnorm: Union[bool, list] = False,
         last_layer_activation: bool = False,
-        use_kan: bool = False,
         **kwargs,
     ):
         """Constructor.
@@ -115,6 +121,11 @@ class FeedForward(lightning.LightningModule):
         return self.nn(x)
 
 
+# =============================================================================
+# FEED FORWARD WITH KAN
+# =============================================================================
+
+
 # define the LightningModule
 class KANFeedForward(lightning.LightningModule):
     def __init__(
@@ -126,10 +137,17 @@ class KANFeedForward(lightning.LightningModule):
         update_grid=True,
         grid_update_num=10,
         stop_grid_update_step=50,
+        kan_type="rbf",
+        use_kan=True,
         **kwargs,
     ):
         super().__init__()
-        self.kan = KAN(build_rbf_layers(layers, **kwargs))
+        if kan_type == "rbf":
+            self.kan = KAN(build_rbf_layers(layers, **kwargs))
+        elif kan_type == "splines":
+            self.kan = KAN(build_splines_layers(layers, **kwargs))
+        elif kan_type == "chebyshev":
+            self.kan = KAN(build_chebyshev_layers(layers, **kwargs))
         self.lamb = lamb
         self.lamb_l1 = lamb_l1
         self.lamb_entropy = lamb_entropy

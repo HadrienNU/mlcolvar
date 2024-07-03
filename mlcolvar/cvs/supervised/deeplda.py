@@ -1,7 +1,7 @@
 import torch
 import lightning
 from mlcolvar.cvs import BaseCV
-from mlcolvar.core import FeedForward, Normalization
+from mlcolvar.core import get_feedforward, Normalization
 from mlcolvar.data import DictModule
 from mlcolvar.core.stats import LDA
 from mlcolvar.core.loss import ReduceEigenvaluesLoss
@@ -128,7 +128,7 @@ class DeepLDA(BaseCV, lightning.LightningModule):
 
         # initialize nn
         o = "nn"
-        self.nn = FeedForward(layers, **options[o])
+        self.nn = get_feedforward(layers, options[o])
 
         # initialize lda
         o = "lda"
@@ -274,7 +274,7 @@ def test_deepkanlda(n_states=2):
     # initialize CV
     opts = {
         "norm_in": {"mode": "mean_std"},
-        "nn": {"use_kan": "True", "grid_size": 6},
+        "nn": {"grid_size": 6, "use_kan": True},
         "lda": {},
     }
     model = DeepLDA(layers, n_states, options=opts)
