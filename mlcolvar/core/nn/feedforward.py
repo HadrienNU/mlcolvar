@@ -8,7 +8,7 @@
 Variational Autoencoder collective variable.
 """
 
-__all__ = ["FeedForward", "KANFeedForward", "get_feedforward"]
+__all__ = ["FeedForward", "get_feedforward"]
 
 
 # =============================================================================
@@ -20,7 +20,6 @@ from typing import Optional, Union
 import torch
 import lightning
 from mlcolvar.core.nn.utils import get_activation, parse_nn_options
-from better_kan import KAN, build_rbf_layers, build_splines_layers, build_chebyshev_layers
 
 
 def get_feedforward(layers, options):
@@ -119,62 +118,3 @@ class FeedForward(lightning.LightningModule):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.nn(x)
-
-
-# =============================================================================
-# FEED FORWARD WITH KAN
-# =============================================================================
-
-
-# define the LightningModule
-class KANFeedForward(lightning.LightningModule):
-    def __init__(
-        self,
-        layers,
-        lamb=0.01,
-        lamb_l1=1.0,
-        lamb_entropy=1.0,
-        update_grid=True,
-        grid_update_num=10,
-        stop_grid_update_step=50,
-        kan_type="rbf",
-        use_kan=True,
-        **kwargs,
-    ):
-        super().__init__()
-        if kan_type == "rbf":
-            self.kan = KAN(build_rbf_layers(layers, **kwargs))
-        elif kan_type == "splines":
-            self.kan = KAN(build_splines_layers(layers, **kwargs))
-        elif kan_type == "chebyshev":
-            self.kan = KAN(build_chebyshev_layers(layers, **kwargs))
-        self.lamb = lamb
-        self.lamb_l1 = lamb_l1
-        self.lamb_entropy = lamb_entropy
-
-        # If training is used
-        self.update_grid = update_grid
-        self.stop_grid_update_step = stop_grid_update_step
-        self.grid_update_freq = int(stop_grid_update_step / grid_update_num)
-
-    def forward(self, x: torch.Tensor, update_grid=False) -> torch.Tensor:
-        return self.kan.forward(x, update_grid=update_grid)
-
-    def regularization(self):
-        return self.lamb * self.kan.regularization_loss(self.lamb_l1, self.lamb_entropy)
-
-    def training_step(self, batch, batch_idx):
-        # training_step defines the train loop.
-        # it is independent of forward
-
-        x, y = batch
-        x = x.view(-1, self.kan.width[0])  # Assure input has the correct size
-
-        pred = self.kan.forward(x, update_grid=(batch_idx % self.grid_update_freq == 0 and batch_idx < self.stop_grid_update_step and self.update_grid))
-        train_loss = torch.mean((pred - y) ** 2)
-        reg_ = self.regularization()
-        loss = train_loss + reg_
-
-        self.log("train_loss", loss)
-        self.log("regularization", reg_)
-        return loss
