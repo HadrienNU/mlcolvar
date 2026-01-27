@@ -23,10 +23,7 @@ from mlcolvar.core.nn.utils import get_activation, parse_nn_options
 
 
 def get_feedforward(layers, options):
-    if options.get("use_kan", False):
-        return KANFeedForward(layers, **options)
-    else:
-        return FeedForward(layers, **options)
+    return FeedForward(layers, **options)
 
 
 # =============================================================================
